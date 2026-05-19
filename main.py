@@ -293,6 +293,33 @@ def register_machine(conn: sqlite3.Connection, payload: MachineCreate) -> Dict[s
     return row_to_dict(machine)
 
 
+def touch_machine(conn: sqlite3.Connection, serial: str) -> Dict[str, Any]:
+    if not is_16_digit_code(serial):
+        raise HTTPException(status_code=400, detail="La serie debe tener 16 digitos")
+
+    existing = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
+    timestamp = now_iso()
+
+    if existing:
+        conn.execute(
+            "UPDATE machines SET status = ?, last_seen = ? WHERE serial = ?",
+            ("En linea", timestamp, serial),
+        )
+    else:
+        register_machine(
+            conn,
+            MachineCreate(
+                serial=serial,
+                model="M10 Productos de Limpieza",
+                location="Ubicacion pendiente",
+                status="En linea",
+            ),
+        )
+
+    machine = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
+    return row_to_dict(machine)
+
+
 def machine_summary(conn: sqlite3.Connection, serial: str) -> Dict[str, Any]:
     machine = get_machine_or_404(conn, serial)
     totals = conn.execute(
@@ -347,15 +374,7 @@ def login(payload: LoginRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="Codigo no valido")
 
     with get_db() as conn:
-        machine = register_machine(
-            conn,
-            MachineCreate(
-                serial=code,
-                model="M10 Productos de Limpieza",
-                location="Ubicacion pendiente",
-                status="En linea",
-            ),
-        )
+        machine = touch_machine(conn, code)
     return {"role": "client", "code": code, "machine": machine}
 
 
@@ -376,13 +395,7 @@ def create_machine(payload: MachineCreate, _: None = Depends(verify_owner_access
 @app.post("/machines/{serial}/heartbeat")
 def heartbeat(serial: str) -> Dict[str, Any]:
     with get_db() as conn:
-        payload = MachineCreate(
-            serial=serial,
-            model="M10 Productos de Limpieza",
-            location="Ubicacion pendiente",
-            status="En linea",
-        )
-        machine = register_machine(conn, payload)
+        machine = touch_machine(conn, serial)
     return {"machine": machine, "online": True}
 
 
