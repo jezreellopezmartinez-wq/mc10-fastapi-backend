@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import sqlite3
 from datetime import datetime
@@ -12,67 +14,111 @@ from pydantic import BaseModel, Field
 DB_PATH = Path(os.getenv("MC10_DB_PATH", "mc10_cloud.sqlite3"))
 OWNER_ACCESS_CODE = os.getenv("MC10_OWNER_CODE", "9876543210987654")
 DEMO_MACHINE_CODE = os.getenv("MC10_DEMO_MACHINE_CODE", "1234567890123456")
+ENABLE_DEMO_DATA = os.getenv("MC10_ENABLE_DEMO_DATA", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 DEFAULT_PRODUCTS = [
-    {"product_id": 1, "name": "Pinol", "relay": 1, "price": 30, "dispense_size": 1.5},
-    {"product_id": 2, "name": "Cloro", "relay": 2, "price": 40, "dispense_size": 1.5},
-    {"product_id": 3, "name": "Suavizante", "relay": 3, "price": 45, "dispense_size": 1.5},
-    {"product_id": 4, "name": "Jabon para ropa", "relay": 4, "price": 50, "dispense_size": 1.5},
-    {"product_id": 5, "name": "Multiusos", "relay": 5, "price": 40, "dispense_size": 1.5},
-    {"product_id": 6, "name": "Desengrasante", "relay": 6, "price": 50, "dispense_size": 1.5},
-    {"product_id": 7, "name": "Aromatizante", "relay": 7, "price": 35, "dispense_size": 1.0},
-    {"product_id": 8, "name": "Shampoo para auto", "relay": 8, "price": 50, "dispense_size": 1.5},
-    {"product_id": 9, "name": "Limpiavidrios", "relay": 9, "price": 40, "dispense_size": 1.5},
-    {"product_id": 10, "name": "Gel antibacterial", "relay": 10, "price": 40, "dispense_size": 1.0},
+    {"product_id": 1, "name": "Pinol", "relay": 1, "price": 30, "dispense_size": 1.5, "category": "Limpieza"},
+    {"product_id": 2, "name": "Cloro", "relay": 2, "price": 40, "dispense_size": 1.5, "category": "Limpieza"},
+    {"product_id": 3, "name": "Suavizante", "relay": 3, "price": 45, "dispense_size": 1.5, "category": "Limpieza"},
+    {"product_id": 4, "name": "Jabon para ropa", "relay": 4, "price": 50, "dispense_size": 1.5, "category": "Limpieza"},
+    {"product_id": 5, "name": "Multiusos", "relay": 5, "price": 40, "dispense_size": 1.5, "category": "Limpieza"},
+    {"product_id": 6, "name": "Desengrasante", "relay": 6, "price": 50, "dispense_size": 1.5, "category": "Limpieza"},
+    {"product_id": 7, "name": "Aromatizante", "relay": 7, "price": 35, "dispense_size": 1.0, "category": "Limpieza"},
+    {"product_id": 8, "name": "Shampoo para auto", "relay": 8, "price": 50, "dispense_size": 1.5, "category": "Limpieza"},
+    {"product_id": 9, "name": "Limpiavidrios", "relay": 9, "price": 40, "dispense_size": 1.5, "category": "Limpieza"},
+    {"product_id": 10, "name": "Gel antibacterial", "relay": 10, "price": 40, "dispense_size": 1.0, "category": "Limpieza"},
 ]
 
 
 DEMO_MACHINES = [
     {
         "serial": DEMO_MACHINE_CODE,
+        "name": "Demo limpieza 1",
         "model": "M10 Productos de Limpieza",
+        "profile_id": "limpieza",
+        "profile_title": "Productos de Limpieza",
         "location": "Monterrey, Nuevo Leon",
         "status": "En linea",
     },
     {
         "serial": "2222333344445555",
+        "name": "Demo limpieza 2",
         "model": "M10 Productos de Limpieza",
+        "profile_id": "limpieza",
+        "profile_title": "Productos de Limpieza",
         "location": "San Nicolas, Nuevo Leon",
         "status": "En linea",
     },
     {
         "serial": "3333444455556666",
+        "name": "Demo limpieza 3",
         "model": "MC10 Limpieza Express",
+        "profile_id": "limpieza",
+        "profile_title": "Productos de Limpieza",
         "location": "Guadalupe, Nuevo Leon",
         "status": "En linea",
     },
     {
         "serial": "4444555566667777",
+        "name": "Demo limpieza 4",
         "model": "M10 Productos de Limpieza",
+        "profile_id": "limpieza",
+        "profile_title": "Productos de Limpieza",
         "location": "Apodaca, Nuevo Leon",
         "status": "Fuera de linea",
     },
 ]
+
+DEMO_MACHINE_CODES = {machine["serial"] for machine in DEMO_MACHINES}
 
 
 class LoginRequest(BaseModel):
     code: str = Field(..., min_length=1)
 
 
+class ProductUpsert(BaseModel):
+    product_id: int = Field(..., ge=1)
+    name: Optional[str] = None
+    relay: Optional[int] = None
+    price: Optional[float] = None
+    dispense_size: Optional[float] = None
+    ms: Optional[int] = None
+    calibration_ms: Optional[int] = None
+    active: Optional[bool] = None
+    category: Optional[str] = None
+
+
 class MachineCreate(BaseModel):
     serial: str = Field(..., min_length=16, max_length=16)
-    model: str = "M10 Productos de Limpieza"
+    name: Optional[str] = None
+    model: str = "MC10"
+    profile_id: Optional[str] = None
+    profile_title: Optional[str] = None
     location: str = "Sin ubicacion"
     status: str = "En linea"
+    version: Optional[str] = None
+    cloud_enabled: Optional[bool] = True
+    products: Optional[List[ProductUpsert]] = None
 
 
 class SaleCreate(BaseModel):
+    sale_id: Optional[str] = None
+    request_id: Optional[str] = None
     product_id: Optional[int] = None
     product_name: Optional[str] = None
     method: str = "MEI"
+    payment_method: Optional[str] = None
     amount: Optional[float] = None
     units: Optional[float] = None
+    currency: Optional[str] = None
+    sold_at: Optional[str] = None
+    source: Optional[str] = None
+    app_version: Optional[str] = None
+    channel: Optional[int] = None
+    relay: Optional[int] = None
+    local_sale_counter: Optional[int] = None
+    dispatch_status: Optional[str] = None
 
 
 class AlertCreate(BaseModel):
@@ -86,13 +132,19 @@ class ProductPatch(BaseModel):
     name: Optional[str] = None
     price: Optional[float] = None
     dispense_size: Optional[float] = None
+    relay: Optional[int] = None
+    ms: Optional[int] = None
+    calibration_ms: Optional[int] = None
+    active: Optional[bool] = None
+    category: Optional[str] = None
 
 
 class MachineStatusPatch(BaseModel):
     status: str = "En linea"
+    version: Optional[str] = None
 
 
-app = FastAPI(title="MC10 Cloud API", version="0.1.0")
+app = FastAPI(title="MC10 Cloud API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -117,10 +169,6 @@ def row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     return dict(row)
 
 
-def rows_to_dicts(rows: List[sqlite3.Row]) -> List[Dict[str, Any]]:
-    return [row_to_dict(row) for row in rows]
-
-
 def is_16_digit_code(value: str) -> bool:
     return value.isdigit() and len(value) == 16
 
@@ -130,17 +178,78 @@ def verify_owner_access(x_mc10_owner_code: Optional[str] = Header(None)) -> None
         raise HTTPException(status_code=401, detail="Acceso de dueño no autorizado")
 
 
+def safe_text(value: Optional[str], fallback: str = "") -> str:
+    text = str(value or "").strip()
+    return text if text else fallback
+
+
+def bool_to_int(value: Optional[bool], fallback: bool = True) -> int:
+    if value is None:
+        return 1 if fallback else 0
+    return 1 if bool(value) else 0
+
+
+def is_demo_serial(serial: str) -> bool:
+    return serial in DEMO_MACHINE_CODES
+
+
+def get_table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {row["name"] for row in rows}
+
+
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    if column in get_table_columns(conn, table):
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def serialize_machine(row: sqlite3.Row) -> Dict[str, Any]:
+    data = row_to_dict(row)
+    data["cloud_enabled"] = bool(data.get("cloud_enabled", 1))
+    data["profileId"] = data.get("profile_id", "")
+    data["profileTitle"] = data.get("profile_title", "")
+    return data
+
+
+def serialize_product(row: sqlite3.Row) -> Dict[str, Any]:
+    data = row_to_dict(row)
+    data["active"] = bool(data.get("active", 1))
+    data["dispenseSize"] = data.get("dispense_size", 0)
+    data["calibrationMs"] = data.get("calibration_ms", 0)
+    if "mei_sales" in data:
+        data["meiSales"] = float(data.get("mei_sales") or 0)
+    if "terminal_sales" in data:
+        data["terminalSales"] = float(data.get("terminal_sales") or 0)
+    if "last_sale_at" in data:
+        data["lastSaleAt"] = data.get("last_sale_at") or ""
+        data["lastSale"] = data["name"] if (data.get("quantity") or 0) > 0 else "Sin ventas"
+    return data
+
+
+def serialize_sale(row: sqlite3.Row) -> Dict[str, Any]:
+    data = row_to_dict(row)
+    data["occurred_at"] = data.get("sold_at") or data.get("created_at")
+    return data
+
+
 def init_db() -> None:
     with get_db() as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS machines (
               serial TEXT PRIMARY KEY,
+              name TEXT NOT NULL DEFAULT '',
               model TEXT NOT NULL,
+              profile_id TEXT NOT NULL DEFAULT '',
+              profile_title TEXT NOT NULL DEFAULT '',
               location TEXT NOT NULL,
               status TEXT NOT NULL,
+              version TEXT NOT NULL DEFAULT '',
+              cloud_enabled INTEGER NOT NULL DEFAULT 1,
               last_seen TEXT NOT NULL,
-              created_at TEXT NOT NULL
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS products (
@@ -150,6 +259,11 @@ def init_db() -> None:
               relay INTEGER NOT NULL,
               price REAL NOT NULL,
               dispense_size REAL NOT NULL,
+              ms INTEGER NOT NULL DEFAULT 0,
+              calibration_ms INTEGER NOT NULL DEFAULT 0,
+              active INTEGER NOT NULL DEFAULT 1,
+              category TEXT NOT NULL DEFAULT '',
+              updated_at TEXT NOT NULL DEFAULT '',
               PRIMARY KEY (machine_serial, product_id),
               FOREIGN KEY (machine_serial) REFERENCES machines(serial)
             );
@@ -157,11 +271,22 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS sales (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               machine_serial TEXT NOT NULL,
+              sale_id TEXT,
+              request_id TEXT,
               product_id INTEGER,
               product_name TEXT NOT NULL,
               method TEXT NOT NULL,
+              payment_method TEXT NOT NULL DEFAULT '',
               amount REAL NOT NULL,
               units REAL NOT NULL,
+              currency TEXT NOT NULL DEFAULT 'MXN',
+              source TEXT NOT NULL DEFAULT '',
+              app_version TEXT NOT NULL DEFAULT '',
+              channel INTEGER NOT NULL DEFAULT 0,
+              relay INTEGER NOT NULL DEFAULT 0,
+              local_sale_counter INTEGER NOT NULL DEFAULT 0,
+              dispatch_status TEXT NOT NULL DEFAULT '',
+              sold_at TEXT NOT NULL DEFAULT '',
               created_at TEXT NOT NULL,
               FOREIGN KEY (machine_serial) REFERENCES machines(serial)
             );
@@ -178,45 +303,83 @@ def init_db() -> None:
             );
             """
         )
-        seed_demo_data(conn)
+
+        ensure_column(conn, "machines", "name", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "profile_id", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "profile_title", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "version", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "cloud_enabled", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(conn, "machines", "updated_at", "TEXT NOT NULL DEFAULT ''")
+
+        ensure_column(conn, "products", "ms", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "products", "calibration_ms", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "products", "active", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(conn, "products", "category", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "products", "updated_at", "TEXT NOT NULL DEFAULT ''")
+
+        ensure_column(conn, "sales", "sale_id", "TEXT")
+        ensure_column(conn, "sales", "request_id", "TEXT")
+        ensure_column(conn, "sales", "payment_method", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "sales", "currency", "TEXT NOT NULL DEFAULT 'MXN'")
+        ensure_column(conn, "sales", "source", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "sales", "app_version", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "sales", "channel", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "sales", "relay", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "sales", "local_sale_counter", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "sales", "dispatch_status", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "sales", "sold_at", "TEXT NOT NULL DEFAULT ''")
+
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_sale_id
+            ON sales(sale_id)
+            WHERE sale_id IS NOT NULL AND sale_id <> ''
+            """
+        )
+
+        if ENABLE_DEMO_DATA:
+            seed_demo_data(conn)
 
 
 def seed_demo_data(conn: sqlite3.Connection) -> None:
     timestamp = now_iso()
 
     for machine in DEMO_MACHINES:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO machines (serial, model, location, status, last_seen, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                machine["serial"],
-                machine["model"],
-                machine["location"],
-                machine["status"],
-                timestamp,
-                timestamp,
+        register_machine(
+            conn,
+            MachineCreate(
+                serial=machine["serial"],
+                name=machine["name"],
+                model=machine["model"],
+                profile_id=machine["profile_id"],
+                profile_title=machine["profile_title"],
+                location=machine["location"],
+                status=machine["status"],
+                version="demo",
+                cloud_enabled=True,
+                products=[ProductUpsert(**product) for product in DEFAULT_PRODUCTS],
             ),
         )
-        ensure_default_products(conn, machine["serial"])
 
     sales_count = conn.execute("SELECT COUNT(*) AS total FROM sales").fetchone()["total"]
     if sales_count == 0:
         demo_sales = [
-            (DEMO_MACHINE_CODE, 1, "Pinol", "MEI", 30, 1.5),
-            (DEMO_MACHINE_CODE, 2, "Cloro", "Terminal", 40, 1.5),
-            ("2222333344445555", 5, "Multiusos", "Terminal", 40, 1.5),
-            ("2222333344445555", 7, "Aromatizante", "MEI", 35, 1.0),
-            ("3333444455556666", 4, "Jabon para ropa", "Terminal", 50, 1.5),
-            ("4444555566667777", 9, "Limpiavidrios", "MEI", 40, 1.5),
+            (DEMO_MACHINE_CODE, "DEMO-SALE-1", 1, "Pinol", "MEI", "mei", 30, 1.5),
+            (DEMO_MACHINE_CODE, "DEMO-SALE-2", 2, "Cloro", "Terminal", "terminal", 40, 1.5),
+            ("2222333344445555", "DEMO-SALE-3", 5, "Multiusos", "Terminal", "terminal", 40, 1.5),
+            ("2222333344445555", "DEMO-SALE-4", 7, "Aromatizante", "MEI", "mei", 35, 1.0),
+            ("3333444455556666", "DEMO-SALE-5", 4, "Jabon para ropa", "Terminal", "terminal", 50, 1.5),
+            ("4444555566667777", "DEMO-SALE-6", 9, "Limpiavidrios", "MEI", "mei", 40, 1.5),
         ]
         conn.executemany(
             """
-            INSERT INTO sales (machine_serial, product_id, product_name, method, amount, units, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO sales (
+              machine_serial, sale_id, product_id, product_name, method, payment_method,
+              amount, units, currency, source, app_version, sold_at, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'MXN', 'demo-seed', 'demo', ?, ?)
             """,
-            [sale + (timestamp,) for sale in demo_sales],
+            [sale + (timestamp, timestamp) for sale in demo_sales],
         )
 
     alerts_count = conn.execute("SELECT COUNT(*) AS total FROM alerts").fetchone()["total"]
@@ -237,87 +400,153 @@ def seed_demo_data(conn: sqlite3.Connection) -> None:
         )
 
 
-def ensure_default_products(conn: sqlite3.Connection, serial: str) -> None:
-    product_count = conn.execute(
-        "SELECT COUNT(*) AS total FROM products WHERE machine_serial = ?",
-        (serial,),
-    ).fetchone()["total"]
-    if product_count:
-        return
-
-    conn.executemany(
-        """
-        INSERT INTO products (machine_serial, product_id, name, relay, price, dispense_size)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        [
-            (
-                serial,
-                product["product_id"],
-                product["name"],
-                product["relay"],
-                product["price"],
-                product["dispense_size"],
-            )
-            for product in DEFAULT_PRODUCTS
-        ],
-    )
-
-
 def get_machine_or_404(conn: sqlite3.Connection, serial: str) -> sqlite3.Row:
+    if not ENABLE_DEMO_DATA and is_demo_serial(serial):
+        raise HTTPException(status_code=404, detail="Maquina no encontrada")
     machine = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
     if not machine:
         raise HTTPException(status_code=404, detail="Maquina no encontrada")
     return machine
 
 
+def upsert_machine_product(
+    conn: sqlite3.Connection,
+    serial: str,
+    product_id: int,
+    payload: ProductPatch | ProductUpsert | Dict[str, Any],
+) -> Dict[str, Any]:
+    existing = conn.execute(
+        "SELECT * FROM products WHERE machine_serial = ? AND product_id = ?",
+        (serial, product_id),
+    ).fetchone()
+    values = payload.model_dump(exclude_none=True) if isinstance(payload, BaseModel) else dict(payload)
+    timestamp = now_iso()
+
+    next_name = safe_text(values.get("name"), existing["name"] if existing else f"Producto {product_id}")
+    next_relay = int(values.get("relay", existing["relay"] if existing else product_id) or product_id)
+    next_price = float(values.get("price", existing["price"] if existing else 0) or 0)
+    next_dispense_size = float(values.get("dispense_size", existing["dispense_size"] if existing else 1) or 1)
+    next_ms = int(values.get("ms", existing["ms"] if existing else 0) or 0)
+    next_calibration_ms = int(values.get("calibration_ms", existing["calibration_ms"] if existing else next_ms) or next_ms)
+    next_active = bool_to_int(values.get("active"), bool(existing["active"]) if existing else True)
+    next_category = safe_text(values.get("category"), existing["category"] if existing else "")
+
+    conn.execute(
+        """
+        INSERT INTO products (
+          machine_serial, product_id, name, relay, price, dispense_size,
+          ms, calibration_ms, active, category, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(machine_serial, product_id) DO UPDATE SET
+          name = excluded.name,
+          relay = excluded.relay,
+          price = excluded.price,
+          dispense_size = excluded.dispense_size,
+          ms = excluded.ms,
+          calibration_ms = excluded.calibration_ms,
+          active = excluded.active,
+          category = excluded.category,
+          updated_at = excluded.updated_at
+        """,
+        (
+            serial,
+            product_id,
+            next_name,
+            next_relay,
+            next_price,
+            next_dispense_size,
+            next_ms,
+            next_calibration_ms,
+            next_active,
+            next_category,
+            timestamp,
+        ),
+    )
+
+    row = conn.execute(
+        "SELECT * FROM products WHERE machine_serial = ? AND product_id = ?",
+        (serial, product_id),
+    ).fetchone()
+    return serialize_product(row)
+
+
+def upsert_machine_products(conn: sqlite3.Connection, serial: str, products: List[ProductUpsert]) -> List[Dict[str, Any]]:
+    return [upsert_machine_product(conn, serial, product.product_id, product) for product in products]
+
+
 def register_machine(conn: sqlite3.Connection, payload: MachineCreate) -> Dict[str, Any]:
     if not is_16_digit_code(payload.serial):
         raise HTTPException(status_code=400, detail="La serie debe tener 16 digitos")
 
+    existing = conn.execute("SELECT * FROM machines WHERE serial = ?", (payload.serial,)).fetchone()
     timestamp = now_iso()
+
+    next_model = safe_text(payload.model, existing["model"] if existing else "MC10")
+    next_name = safe_text(payload.name, existing["name"] if existing else next_model)
+    next_profile_id = safe_text(payload.profile_id, existing["profile_id"] if existing else "")
+    next_profile_title = safe_text(payload.profile_title, existing["profile_title"] if existing else next_model)
+    next_location = safe_text(payload.location, existing["location"] if existing else "Ubicacion pendiente")
+    next_status = safe_text(payload.status, existing["status"] if existing else "En linea")
+    next_version = safe_text(payload.version, existing["version"] if existing else "")
+    next_cloud_enabled = bool_to_int(payload.cloud_enabled, bool(existing["cloud_enabled"]) if existing else True)
+    created_at = existing["created_at"] if existing else timestamp
+
     conn.execute(
         """
-        INSERT INTO machines (serial, model, location, status, last_seen, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO machines (
+          serial, name, model, profile_id, profile_title, location,
+          status, version, cloud_enabled, last_seen, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(serial) DO UPDATE SET
+          name = excluded.name,
           model = excluded.model,
+          profile_id = excluded.profile_id,
+          profile_title = excluded.profile_title,
           location = excluded.location,
           status = excluded.status,
-          last_seen = excluded.last_seen
+          version = excluded.version,
+          cloud_enabled = excluded.cloud_enabled,
+          last_seen = excluded.last_seen,
+          updated_at = excluded.updated_at
         """,
-        (payload.serial, payload.model, payload.location, payload.status, timestamp, timestamp),
+        (
+            payload.serial,
+            next_name,
+            next_model,
+            next_profile_id,
+            next_profile_title,
+            next_location,
+            next_status,
+            next_version,
+            next_cloud_enabled,
+            timestamp,
+            created_at,
+            timestamp,
+        ),
     )
-    ensure_default_products(conn, payload.serial)
+
+    if payload.products:
+        upsert_machine_products(conn, payload.serial, payload.products)
+
     machine = conn.execute("SELECT * FROM machines WHERE serial = ?", (payload.serial,)).fetchone()
-    return row_to_dict(machine)
+    return serialize_machine(machine)
 
 
-def touch_machine(conn: sqlite3.Connection, serial: str) -> Dict[str, Any]:
+def touch_machine(conn: sqlite3.Connection, serial: str, *, status: Optional[str] = None) -> Dict[str, Any]:
     if not is_16_digit_code(serial):
         raise HTTPException(status_code=400, detail="La serie debe tener 16 digitos")
 
-    existing = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
+    machine = get_machine_or_404(conn, serial)
     timestamp = now_iso()
-
-    if existing:
-        conn.execute(
-            "UPDATE machines SET status = ?, last_seen = ? WHERE serial = ?",
-            ("En linea", timestamp, serial),
-        )
-    else:
-        register_machine(
-            conn,
-            MachineCreate(
-                serial=serial,
-                model="M10 Productos de Limpieza",
-                location="Ubicacion pendiente",
-                status="En linea",
-            ),
-        )
-
-    machine = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
-    return row_to_dict(machine)
+    next_status = safe_text(status, machine["status"])
+    conn.execute(
+        "UPDATE machines SET status = ?, last_seen = ?, updated_at = ? WHERE serial = ?",
+        (next_status, timestamp, timestamp, serial),
+    )
+    updated = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
+    return serialize_machine(updated)
 
 
 def machine_summary(conn: sqlite3.Connection, serial: str) -> Dict[str, Any]:
@@ -341,14 +570,14 @@ def machine_summary(conn: sqlite3.Connection, serial: str) -> Dict[str, Any]:
     ).fetchone()["total"]
 
     return {
-        "machine": row_to_dict(machine),
+        "machine": serialize_machine(machine),
         "summary": {
-            "totalToday": totals["total_today"],
-            "meiTotal": totals["mei_total"],
-            "terminalTotal": totals["terminal_total"],
-            "productsSold": totals["products_sold"],
-            "liters": totals["liters"],
-            "alerts": active_alerts,
+            "totalToday": float(totals["total_today"] or 0),
+            "meiTotal": float(totals["mei_total"] or 0),
+            "terminalTotal": float(totals["terminal_total"] or 0),
+            "productsSold": int(totals["products_sold"] or 0),
+            "liters": float(totals["liters"] or 0),
+            "alerts": int(active_alerts or 0),
         },
     }
 
@@ -381,12 +610,19 @@ def login(payload: LoginRequest) -> Dict[str, Any]:
 @app.get("/machines")
 def list_machines(_: None = Depends(verify_owner_access)) -> List[Dict[str, Any]]:
     with get_db() as conn:
-        rows = conn.execute("SELECT * FROM machines ORDER BY created_at DESC").fetchall()
-    return rows_to_dicts(rows)
+        if ENABLE_DEMO_DATA:
+            rows = conn.execute("SELECT * FROM machines ORDER BY created_at DESC").fetchall()
+        else:
+            placeholders = ",".join("?" for _ in DEMO_MACHINE_CODES)
+            rows = conn.execute(
+                f"SELECT * FROM machines WHERE serial NOT IN ({placeholders}) ORDER BY created_at DESC",
+                tuple(DEMO_MACHINE_CODES),
+            ).fetchall() if DEMO_MACHINE_CODES else conn.execute("SELECT * FROM machines ORDER BY created_at DESC").fetchall()
+    return [serialize_machine(row) for row in rows]
 
 
 @app.post("/machines")
-def create_machine(payload: MachineCreate, _: None = Depends(verify_owner_access)) -> Dict[str, Any]:
+def create_machine(payload: MachineCreate) -> Dict[str, Any]:
     with get_db() as conn:
         machine = register_machine(conn, payload)
     return machine
@@ -395,25 +631,23 @@ def create_machine(payload: MachineCreate, _: None = Depends(verify_owner_access
 @app.post("/machines/{serial}/heartbeat")
 def heartbeat(serial: str) -> Dict[str, Any]:
     with get_db() as conn:
-        machine = touch_machine(conn, serial)
+        machine = touch_machine(conn, serial, status="En linea")
     return {"machine": machine, "online": True}
 
 
 @app.patch("/machines/{serial}/status")
-def update_machine_status(
-    serial: str,
-    payload: MachineStatusPatch,
-    _: None = Depends(verify_owner_access),
-) -> Dict[str, Any]:
+def update_machine_status(serial: str, payload: MachineStatusPatch) -> Dict[str, Any]:
     with get_db() as conn:
-        get_machine_or_404(conn, serial)
+        machine = get_machine_or_404(conn, serial)
         timestamp = now_iso()
+        next_status = safe_text(payload.status, machine["status"])
+        next_version = safe_text(payload.version, machine["version"])
         conn.execute(
-            "UPDATE machines SET status = ?, last_seen = ? WHERE serial = ?",
-            (payload.status, timestamp, serial),
+            "UPDATE machines SET status = ?, version = ?, last_seen = ?, updated_at = ? WHERE serial = ?",
+            (next_status, next_version, timestamp, timestamp, serial),
         )
-        machine = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
-    return row_to_dict(machine)
+        updated = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
+    return serialize_machine(updated)
 
 
 @app.get("/machines/{serial}/summary")
@@ -425,7 +659,15 @@ def get_machine_summary(serial: str) -> Dict[str, Any]:
 @app.get("/owner/summary")
 def get_owner_summary(_: None = Depends(verify_owner_access)) -> Dict[str, Any]:
     with get_db() as conn:
-        machines = rows_to_dicts(conn.execute("SELECT * FROM machines ORDER BY created_at DESC").fetchall())
+        if ENABLE_DEMO_DATA:
+            rows = conn.execute("SELECT * FROM machines ORDER BY created_at DESC").fetchall()
+        else:
+            placeholders = ",".join("?" for _ in DEMO_MACHINE_CODES)
+            rows = conn.execute(
+                f"SELECT * FROM machines WHERE serial NOT IN ({placeholders}) ORDER BY created_at DESC",
+                tuple(DEMO_MACHINE_CODES),
+            ).fetchall() if DEMO_MACHINE_CODES else conn.execute("SELECT * FROM machines ORDER BY created_at DESC").fetchall()
+        machines = [serialize_machine(row) for row in rows]
         summaries = [machine_summary(conn, machine["serial"]) for machine in machines]
 
     totals = {
@@ -446,45 +688,35 @@ def list_products(serial: str) -> List[Dict[str, Any]]:
     with get_db() as conn:
         get_machine_or_404(conn, serial)
         rows = conn.execute(
-            "SELECT * FROM products WHERE machine_serial = ? ORDER BY product_id",
+            """
+            SELECT
+              p.*,
+              COUNT(s.id) AS quantity,
+              COALESCE(SUM(s.units), 0) AS units,
+              COALESCE(SUM(CASE WHEN s.method = 'MEI' THEN s.amount ELSE 0 END), 0) AS mei_sales,
+              COALESCE(SUM(CASE WHEN s.method = 'Terminal' THEN s.amount ELSE 0 END), 0) AS terminal_sales,
+              MAX(CASE WHEN COALESCE(s.sold_at, '') <> '' THEN s.sold_at ELSE s.created_at END) AS last_sale_at
+            FROM products p
+            LEFT JOIN sales s
+              ON s.machine_serial = p.machine_serial
+             AND s.product_id = p.product_id
+            WHERE p.machine_serial = ?
+            GROUP BY
+              p.machine_serial, p.product_id, p.name, p.relay, p.price,
+              p.dispense_size, p.ms, p.calibration_ms, p.active, p.category, p.updated_at
+            ORDER BY p.product_id
+            """,
             (serial,),
         ).fetchall()
-    return rows_to_dicts(rows)
+    return [serialize_product(row) for row in rows]
 
 
 @app.patch("/machines/{serial}/products/{product_id}/price")
-def update_product(
-    serial: str,
-    product_id: int,
-    payload: ProductPatch,
-    _: None = Depends(verify_owner_access),
-) -> Dict[str, Any]:
+def update_product(serial: str, product_id: int, payload: ProductPatch) -> Dict[str, Any]:
     with get_db() as conn:
         get_machine_or_404(conn, serial)
-        product = conn.execute(
-            "SELECT * FROM products WHERE machine_serial = ? AND product_id = ?",
-            (serial, product_id),
-        ).fetchone()
-        if not product:
-            raise HTTPException(status_code=404, detail="Producto no encontrado")
-
-        next_name = payload.name if payload.name is not None else product["name"]
-        next_price = payload.price if payload.price is not None else product["price"]
-        next_dispense = payload.dispense_size if payload.dispense_size is not None else product["dispense_size"]
-
-        conn.execute(
-            """
-            UPDATE products
-            SET name = ?, price = ?, dispense_size = ?
-            WHERE machine_serial = ? AND product_id = ?
-            """,
-            (next_name, next_price, next_dispense, serial, product_id),
-        )
-        updated = conn.execute(
-            "SELECT * FROM products WHERE machine_serial = ? AND product_id = ?",
-            (serial, product_id),
-        ).fetchone()
-    return row_to_dict(updated)
+        updated = upsert_machine_product(conn, serial, product_id, payload)
+    return updated
 
 
 @app.get("/machines/{serial}/sales")
@@ -492,18 +724,52 @@ def list_sales(serial: str) -> List[Dict[str, Any]]:
     with get_db() as conn:
         get_machine_or_404(conn, serial)
         rows = conn.execute(
-            "SELECT * FROM sales WHERE machine_serial = ? ORDER BY created_at DESC, id DESC LIMIT 100",
+            """
+            SELECT *
+            FROM sales
+            WHERE machine_serial = ?
+            ORDER BY
+              CASE WHEN COALESCE(sold_at, '') <> '' THEN sold_at ELSE created_at END DESC,
+              id DESC
+            LIMIT 100
+            """,
             (serial,),
         ).fetchall()
-    return rows_to_dicts(rows)
+    return [serialize_sale(row) for row in rows]
 
 
 @app.post("/machines/{serial}/sales")
 def create_sale(serial: str, payload: SaleCreate) -> Dict[str, Any]:
     with get_db() as conn:
         get_machine_or_404(conn, serial)
+
+        if payload.sale_id:
+            existing_sale = conn.execute(
+                "SELECT * FROM sales WHERE sale_id = ? LIMIT 1",
+                (payload.sale_id,),
+            ).fetchone()
+            if existing_sale:
+                return serialize_sale(existing_sale)
+
         product = None
         if payload.product_id is not None:
+            product = conn.execute(
+                "SELECT * FROM products WHERE machine_serial = ? AND product_id = ?",
+                (serial, payload.product_id),
+            ).fetchone()
+
+        if payload.product_id is not None and product is None:
+            upsert_machine_product(
+                conn,
+                serial,
+                payload.product_id,
+                {
+                    "name": payload.product_name,
+                    "relay": payload.relay if payload.relay is not None else payload.channel,
+                    "price": payload.amount,
+                    "dispense_size": payload.units,
+                },
+            )
             product = conn.execute(
                 "SELECT * FROM products WHERE machine_serial = ? AND product_id = ?",
                 (serial, payload.product_id),
@@ -514,17 +780,49 @@ def create_sale(serial: str, payload: SaleCreate) -> Dict[str, Any]:
         amount = payload.amount if payload.amount is not None else (product["price"] if product else 0)
         units = payload.units if payload.units is not None else (product["dispense_size"] if product else 1)
         timestamp = now_iso()
+        sold_at = safe_text(payload.sold_at, timestamp)
+        payment_method = safe_text(payload.payment_method, payload.method.lower())
+        relay = int(payload.relay if payload.relay is not None else (product["relay"] if product else payload.channel or 0) or 0)
+        channel = int(payload.channel if payload.channel is not None else relay)
+        local_sale_counter = int(payload.local_sale_counter or 0)
+        dispatch_status = safe_text(payload.dispatch_status, "completed")
 
         conn.execute(
             """
-            INSERT INTO sales (machine_serial, product_id, product_name, method, amount, units, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sales (
+              machine_serial, sale_id, request_id, product_id, product_name, method,
+              payment_method, amount, units, currency, source, app_version,
+              channel, relay, local_sale_counter, dispatch_status, sold_at, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (serial, product_id, product_name, payload.method, amount, units, timestamp),
+            (
+                serial,
+                payload.sale_id,
+                payload.request_id,
+                product_id,
+                product_name,
+                payload.method,
+                payment_method,
+                amount,
+                units,
+                safe_text(payload.currency, "MXN"),
+                safe_text(payload.source, "panel-local"),
+                safe_text(payload.app_version, ""),
+                channel,
+                relay,
+                local_sale_counter,
+                dispatch_status,
+                sold_at,
+                timestamp,
+            ),
         )
-        conn.execute("UPDATE machines SET status = ?, last_seen = ? WHERE serial = ?", ("En linea", timestamp, serial))
+        conn.execute(
+            "UPDATE machines SET status = ?, last_seen = ?, updated_at = ? WHERE serial = ?",
+            ("En linea", timestamp, timestamp, serial),
+        )
         sale = conn.execute("SELECT * FROM sales ORDER BY id DESC LIMIT 1").fetchone()
-    return row_to_dict(sale)
+    return serialize_sale(sale)
 
 
 @app.get("/machines/{serial}/alerts")
@@ -535,7 +833,7 @@ def list_alerts(serial: str) -> List[Dict[str, Any]]:
             "SELECT * FROM alerts WHERE machine_serial = ? ORDER BY created_at DESC, id DESC LIMIT 100",
             (serial,),
         ).fetchall()
-    return rows_to_dicts(rows)
+    return [row_to_dict(row) for row in rows]
 
 
 @app.post("/machines/{serial}/alerts/clear")

@@ -1,6 +1,6 @@
 # MC10 FastAPI Backend
 
-Backend inicial para MC Vending System usando FastAPI y SQLite local.
+Backend para MC Vending System usando FastAPI y SQLite local.
 
 ## Ejecutar localmente
 
@@ -19,6 +19,14 @@ http://127.0.0.1:8000/docs
 ```
 
 ## Códigos demo
+
+Los datos demo ya no se cargan por default. Si quieres activarlos para pruebas, arranca con:
+
+```bash
+MC10_ENABLE_DEMO_DATA=1
+```
+
+Solo con esa bandera se siembran máquinas y ventas demo.
 
 Dueño:
 
@@ -48,18 +56,52 @@ MC10_OWNER_CODE=tu_codigo_privado
 
 El panel web usa el código que el dueño escribe en login y lo manda al backend como header. Así el código privado ya no depende solamente del JavaScript público.
 
+## Cambios importantes del backend real
+
+- `POST /auth/login` ya no crea máquinas nuevas con cualquier código de 16 dígitos.
+- una máquina cliente solo entra si ya fue registrada antes por la PC.
+- `POST /machines` ya acepta y actualiza el perfil real de la máquina.
+- `PATCH /machines/:serial/products/:product_id/price` ahora funciona como `upsert` y guarda:
+  - nombre
+  - precio
+  - relay
+  - `dispense_size`
+  - `ms`
+  - `calibration_ms`
+  - `active`
+  - `category`
+- `POST /machines/:serial/sales` ahora guarda metadata real de venta:
+  - `sale_id`
+  - `request_id`
+  - `payment_method`
+  - `currency`
+  - `sold_at`
+  - `source`
+  - `app_version`
+  - `channel`
+  - `relay`
+  - `local_sale_counter`
+  - `dispatch_status`
+- el listado de productos ya devuelve métricas reales por producto:
+  - ventas MEI
+  - ventas Terminal
+  - cantidad
+  - litros/unidades
+  - última venta
+- el backend ya no depende de productos demo para máquinas reales.
+
 ## Endpoints principales
 
 - `GET /health`
 - `POST /auth/login`
 - `GET /owner/summary` requiere `X-MC10-Owner-Code`
 - `GET /machines` requiere `X-MC10-Owner-Code`
-- `POST /machines` requiere `X-MC10-Owner-Code`
+- `POST /machines`
 - `POST /machines/:serial/heartbeat`
-- `PATCH /machines/:serial/status` requiere `X-MC10-Owner-Code`
+- `PATCH /machines/:serial/status`
 - `GET /machines/:serial/summary`
 - `GET /machines/:serial/products`
-- `PATCH /machines/:serial/products/:product_id/price` requiere `X-MC10-Owner-Code`
+- `PATCH /machines/:serial/products/:product_id/price`
 - `GET /machines/:serial/sales`
 - `POST /machines/:serial/sales`
 - `GET /machines/:serial/alerts`
@@ -69,6 +111,8 @@ El panel web usa el código que el dueño escribe en login y lo manda al backend
 ## Notas
 
 - La base SQLite se crea automáticamente como `mc10_cloud.sqlite3`.
-- El backend crea datos demo la primera vez que arranca.
+- Los datos demo solo se crean si `MC10_ENABLE_DEMO_DATA=1`.
+- Si una máquina no existe, el login cliente ya no la da de alta solo por escribir una clave.
+- Para que una máquina aparezca en la web, primero debe registrarse desde la PC/panel.
 - CORS está abierto para facilitar pruebas con Netlify durante el prototipo.
 - Para producción se debe agregar autenticación real, HTTPS, tokens y permisos por usuario.
