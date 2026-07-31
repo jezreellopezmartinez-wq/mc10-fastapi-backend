@@ -2,9 +2,6 @@
 
 Backend para MC Vending System usando FastAPI y PostgreSQL.
 
-Esta carpeta es la copia de trabajo de la etapa 3. No está conectada al servicio
-de producción.
-
 ## Ejecutar localmente
 
 ```bash
