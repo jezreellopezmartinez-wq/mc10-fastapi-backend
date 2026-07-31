@@ -1,6 +1,9 @@
 # MC10 FastAPI Backend
 
-Backend para MC Vending System usando FastAPI y SQLite local.
+Backend para MC Vending System usando FastAPI y PostgreSQL.
+
+Esta carpeta es la copia de trabajo de la etapa 3. No está conectada al servicio
+de producción.
 
 ## Ejecutar localmente
 
@@ -9,6 +12,7 @@ cd mc10-fastapi-backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+export DATABASE_URL='postgresql://usuario:clave@servidor:5432/mc10_cloud'
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -110,7 +114,10 @@ El panel web usa el código que el dueño escribe en login y lo manda al backend
 
 ## Notas
 
-- La base SQLite se crea automáticamente como `mc10_cloud.sqlite3`.
+- `DATABASE_URL` es obligatoria. El backend se detiene de forma segura si no está
+  configurada.
+- Las tablas de PostgreSQL se crean automáticamente al iniciar.
+- No guardes la URL ni la contraseña de PostgreSQL en el repositorio.
 - Los datos demo solo se crean si `MC10_ENABLE_DEMO_DATA=1`.
 - Si una máquina no existe, el login cliente ya no la da de alta solo por escribir una clave.
 - Para que una máquina aparezca en la web, primero debe registrarse desde la PC/panel.
