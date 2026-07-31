@@ -1,0 +1,41 @@
+name: Backup production data
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MC10_OWNER_CODE: ${{ secrets.MC10_OWNER_CODE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify required secret
+        run: |
+          test -n "$MC10_OWNER_CODE"
+
+      - name: Export production API data
+        run: |
+          python scripts/backup_api.py \
+            --base-url https://mc10-fastapi-backend.onrender.com \
+            --output-parent automated-backups
+
+      - name: Upload verified backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: mc10-production-backup-${{ github.run_id }}
+          path: automated-backups/*.zip
+          if-no-files-found: error
+          retention-days: 30
+

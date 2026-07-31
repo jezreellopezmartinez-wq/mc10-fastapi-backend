@@ -47,7 +47,7 @@ def main() -> None:
         raise ValueError("El respaldo de etapa 7 solo admite el backend de produccion")
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    root = args.output_parent.resolve() / f"mc10-cloud-pre-cutover-{timestamp}"
+    root = args.output_parent.resolve() / f"mc10-cloud-backup-{timestamp}"
     if root.exists():
         raise FileExistsError(root)
     data_root = root / "data"

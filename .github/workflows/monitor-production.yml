@@ -1,0 +1,22 @@
+name: Monitor production
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify production health
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --max-time 90 --retry 2 \
+            https://mc10-fastapi-backend.onrender.com/health)"
+          python -c 'import json,sys; data=json.loads(sys.argv[1]); assert data.get("status") == "ok", data' "$response"
+
