@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from uuid import uuid4
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -139,6 +140,21 @@ class ProductPatch(BaseModel):
     category: Optional[str] = None
 
 
+class PriceChangeCreate(BaseModel):
+    product_id: int = Field(..., ge=1)
+    new_price: float = Field(..., ge=0, le=999999)
+
+
+class PriceUpdateBatchCreate(BaseModel):
+    changes: List[PriceChangeCreate] = Field(..., min_length=1, max_length=50)
+
+
+class PriceUpdateConfirm(BaseModel):
+    applied: bool = True
+    message: Optional[str] = None
+    software_version: Optional[str] = None
+
+
 class MachineStatusPatch(BaseModel):
     status: str = "En linea"
     version: Optional[str] = None
@@ -274,6 +290,13 @@ def serialize_sale(row: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+def serialize_price_update(row: Dict[str, Any]) -> Dict[str, Any]:
+    data = row_to_dict(row)
+    data["old_price"] = float(data.get("old_price") or 0)
+    data["new_price"] = float(data.get("new_price") or 0)
+    return data
+
+
 def init_db() -> None:
     with get_db() as conn:
         conn.executescript(
@@ -342,6 +365,22 @@ def init_db() -> None:
               created_at TEXT NOT NULL,
               FOREIGN KEY (machine_serial) REFERENCES machines(serial)
             );
+
+            CREATE TABLE IF NOT EXISTS price_updates (
+              id TEXT PRIMARY KEY,
+              batch_id TEXT NOT NULL,
+              machine_serial TEXT NOT NULL,
+              product_id INTEGER NOT NULL,
+              product_name TEXT NOT NULL,
+              old_price REAL NOT NULL,
+              new_price REAL NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              requested_at TEXT NOT NULL,
+              confirmed_at TEXT NOT NULL DEFAULT '',
+              result_message TEXT NOT NULL DEFAULT '',
+              software_version TEXT NOT NULL DEFAULT '',
+              FOREIGN KEY (machine_serial) REFERENCES machines(serial)
+            );
             """
         )
 
@@ -375,6 +414,12 @@ def init_db() -> None:
             CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_sale_id
             ON sales(sale_id)
             WHERE sale_id IS NOT NULL AND sale_id <> ''
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_price_updates_pending
+            ON price_updates(machine_serial, status, requested_at)
             """
         )
 
@@ -759,6 +804,151 @@ def update_product(serial: str, product_id: int, payload: ProductPatch) -> Dict[
         get_machine_or_404(conn, serial)
         updated = upsert_machine_product(conn, serial, product_id, payload)
     return updated
+
+
+@app.post("/machines/{serial}/price-updates")
+def create_price_updates(
+    serial: str,
+    payload: PriceUpdateBatchCreate,
+    _: None = Depends(verify_owner_access),
+) -> Dict[str, Any]:
+    batch_id = str(uuid4())
+    timestamp = now_iso()
+    created: List[Dict[str, Any]] = []
+
+    with get_db() as conn:
+        get_machine_or_404(conn, serial)
+        product_ids = [change.product_id for change in payload.changes]
+        if len(product_ids) != len(set(product_ids)):
+            raise HTTPException(status_code=400, detail="No repitas un producto en el mismo cambio")
+
+        for change in payload.changes:
+            product = conn.execute(
+                "SELECT * FROM products WHERE machine_serial = ? AND product_id = ?",
+                (serial, change.product_id),
+            ).fetchone()
+            if not product:
+                raise HTTPException(status_code=404, detail=f"Producto {change.product_id} no encontrado")
+
+            # El cambio más reciente reemplaza cualquier solicitud anterior que
+            # todavía no haya sido aplicada para el mismo producto.
+            conn.execute(
+                """
+                UPDATE price_updates
+                SET status = 'cancelled', confirmed_at = ?, result_message = ?
+                WHERE machine_serial = ? AND product_id = ? AND status = 'pending'
+                """,
+                (timestamp, "Reemplazado por un cambio más reciente", serial, change.product_id),
+            )
+
+            update_id = str(uuid4())
+            row = conn.execute(
+                """
+                INSERT INTO price_updates (
+                  id, batch_id, machine_serial, product_id, product_name,
+                  old_price, new_price, status, requested_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                RETURNING *
+                """,
+                (
+                    update_id,
+                    batch_id,
+                    serial,
+                    change.product_id,
+                    product["name"],
+                    float(product["price"] or 0),
+                    round(float(change.new_price), 2),
+                    timestamp,
+                ),
+            ).fetchone()
+            created.append(serialize_price_update(row))
+
+    return {"batch_id": batch_id, "status": "pending", "updates": created}
+
+
+@app.get("/machines/{serial}/price-updates")
+def list_price_updates(
+    serial: str,
+    _: None = Depends(verify_owner_access),
+) -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        get_machine_or_404(conn, serial)
+        rows = conn.execute(
+            """
+            SELECT * FROM price_updates
+            WHERE machine_serial = ?
+            ORDER BY requested_at DESC
+            LIMIT 100
+            """,
+            (serial,),
+        ).fetchall()
+    return [serialize_price_update(row) for row in rows]
+
+
+@app.get("/machines/{serial}/price-updates/pending")
+def list_pending_price_updates(serial: str) -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        get_machine_or_404(conn, serial)
+        rows = conn.execute(
+            """
+            SELECT * FROM price_updates
+            WHERE machine_serial = ? AND status = 'pending'
+            ORDER BY requested_at ASC
+            """,
+            (serial,),
+        ).fetchall()
+    return [serialize_price_update(row) for row in rows]
+
+
+@app.post("/machines/{serial}/price-updates/{update_id}/confirm")
+def confirm_price_update(
+    serial: str,
+    update_id: str,
+    payload: PriceUpdateConfirm,
+) -> Dict[str, Any]:
+    timestamp = now_iso()
+    with get_db() as conn:
+        get_machine_or_404(conn, serial)
+        update = conn.execute(
+            "SELECT * FROM price_updates WHERE id = ? AND machine_serial = ?",
+            (update_id, serial),
+        ).fetchone()
+        if not update:
+            raise HTTPException(status_code=404, detail="Cambio de precio no encontrado")
+
+        # Las confirmaciones repetidas son seguras: devolvemos el estado ya
+        # almacenado sin volver a modificar el producto.
+        if update["status"] != "pending":
+            return serialize_price_update(update)
+
+        next_status = "applied" if payload.applied else "error"
+        if payload.applied:
+            conn.execute(
+                """
+                UPDATE products SET price = ?, updated_at = ?
+                WHERE machine_serial = ? AND product_id = ?
+                """,
+                (float(update["new_price"]), timestamp, serial, int(update["product_id"])),
+            )
+
+        row = conn.execute(
+            """
+            UPDATE price_updates
+            SET status = ?, confirmed_at = ?, result_message = ?, software_version = ?
+            WHERE id = ? AND machine_serial = ?
+            RETURNING *
+            """,
+            (
+                next_status,
+                timestamp,
+                safe_text(payload.message, "Aplicado correctamente" if payload.applied else "No se pudo aplicar"),
+                safe_text(payload.software_version, ""),
+                update_id,
+                serial,
+            ),
+        ).fetchone()
+    return serialize_price_update(row)
 
 
 @app.get("/machines/{serial}/sales")
