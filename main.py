@@ -99,6 +99,18 @@ class MachineCreate(BaseModel):
     location: str = "Sin ubicacion"
     status: str = "En linea"
     version: Optional[str] = None
+    admin_machine_id: Optional[str] = None
+    security_install_fingerprint: Optional[str] = None
+    security_install_fingerprint_status: Optional[str] = None
+    security_install_fingerprint_created_at: Optional[str] = None
+    coin_profile: Optional[str] = None
+    coin_profile_label: Optional[str] = None
+    bill_profile: Optional[str] = None
+    bill_profile_label: Optional[str] = None
+    meiCoinProfile: Optional[str] = None
+    meiCoinProfileLabel: Optional[str] = None
+    meiBillProfile: Optional[str] = None
+    meiBillProfileLabel: Optional[str] = None
     cloud_enabled: Optional[bool] = True
     products: Optional[List[ProductUpsert]] = None
 
@@ -158,6 +170,18 @@ class PriceUpdateConfirm(BaseModel):
 class MachineStatusPatch(BaseModel):
     status: str = "En linea"
     version: Optional[str] = None
+    admin_machine_id: Optional[str] = None
+    security_install_fingerprint: Optional[str] = None
+    security_install_fingerprint_status: Optional[str] = None
+    security_install_fingerprint_created_at: Optional[str] = None
+    coin_profile: Optional[str] = None
+    coin_profile_label: Optional[str] = None
+    bill_profile: Optional[str] = None
+    bill_profile_label: Optional[str] = None
+    meiCoinProfile: Optional[str] = None
+    meiCoinProfileLabel: Optional[str] = None
+    meiBillProfile: Optional[str] = None
+    meiBillProfileLabel: Optional[str] = None
 
 
 app = FastAPI(title="MC10 Cloud API", version="0.2.0")
@@ -233,6 +257,14 @@ def safe_text(value: Optional[str], fallback: str = "") -> str:
     return text if text else fallback
 
 
+def first_text(*values: Optional[str], fallback: str = "") -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return fallback
+
+
 def bool_to_int(value: Optional[bool], fallback: bool = True) -> int:
     if value is None:
         return 1 if fallback else 0
@@ -266,6 +298,18 @@ def serialize_machine(row: Dict[str, Any]) -> Dict[str, Any]:
     data["cloud_enabled"] = bool(data.get("cloud_enabled", 1))
     data["profileId"] = data.get("profile_id", "")
     data["profileTitle"] = data.get("profile_title", "")
+    data["adminMachineId"] = data.get("admin_machine_id", "")
+    data["securityFingerprint"] = data.get("security_install_fingerprint", "")
+    data["securityFingerprintStatus"] = data.get("security_install_fingerprint_status", "")
+    data["securityFingerprintCreatedAt"] = data.get("security_install_fingerprint_created_at", "")
+    data["coinProfile"] = data.get("coin_profile", "")
+    data["coinProfileLabel"] = data.get("coin_profile_label", "")
+    data["billProfile"] = data.get("bill_profile", "")
+    data["billProfileLabel"] = data.get("bill_profile_label", "")
+    data["meiCoinProfile"] = data.get("coin_profile", "")
+    data["meiCoinProfileLabel"] = data.get("coin_profile_label", "")
+    data["meiBillProfile"] = data.get("bill_profile", "")
+    data["meiBillProfileLabel"] = data.get("bill_profile_label", "")
     return data
 
 
@@ -388,6 +432,14 @@ def init_db() -> None:
         ensure_column(conn, "machines", "profile_id", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "machines", "profile_title", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "machines", "version", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "admin_machine_id", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "security_install_fingerprint", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "security_install_fingerprint_status", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "security_install_fingerprint_created_at", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "coin_profile", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "coin_profile_label", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "bill_profile", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "bill_profile_label", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "machines", "cloud_enabled", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(conn, "machines", "updated_at", "TEXT NOT NULL DEFAULT ''")
 
@@ -576,6 +628,31 @@ def register_machine(conn: DatabaseConnection, payload: MachineCreate) -> Dict[s
     next_location = safe_text(payload.location, existing["location"] if existing else "Ubicacion pendiente")
     next_status = safe_text(payload.status, existing["status"] if existing else "En linea")
     next_version = safe_text(payload.version, existing["version"] if existing else "")
+    next_admin_machine_id = safe_text(payload.admin_machine_id, existing["admin_machine_id"] if existing else "")
+    next_security_install_fingerprint = safe_text(
+        payload.security_install_fingerprint,
+        existing["security_install_fingerprint"] if existing else "",
+    )
+    next_security_install_fingerprint_status = safe_text(
+        payload.security_install_fingerprint_status,
+        existing["security_install_fingerprint_status"] if existing else "",
+    )
+    next_security_install_fingerprint_created_at = safe_text(
+        payload.security_install_fingerprint_created_at,
+        existing["security_install_fingerprint_created_at"] if existing else "",
+    )
+    next_coin_profile = first_text(payload.coin_profile, payload.meiCoinProfile, fallback=existing["coin_profile"] if existing else "")
+    next_coin_profile_label = first_text(
+        payload.coin_profile_label,
+        payload.meiCoinProfileLabel,
+        fallback=existing["coin_profile_label"] if existing else "",
+    )
+    next_bill_profile = first_text(payload.bill_profile, payload.meiBillProfile, fallback=existing["bill_profile"] if existing else "")
+    next_bill_profile_label = first_text(
+        payload.bill_profile_label,
+        payload.meiBillProfileLabel,
+        fallback=existing["bill_profile_label"] if existing else "",
+    )
     next_cloud_enabled = bool_to_int(payload.cloud_enabled, bool(existing["cloud_enabled"]) if existing else True)
     created_at = existing["created_at"] if existing else timestamp
 
@@ -583,9 +660,12 @@ def register_machine(conn: DatabaseConnection, payload: MachineCreate) -> Dict[s
         """
         INSERT INTO machines (
           serial, name, model, profile_id, profile_title, location,
-          status, version, cloud_enabled, last_seen, created_at, updated_at
+          status, version, admin_machine_id, security_install_fingerprint,
+          security_install_fingerprint_status, security_install_fingerprint_created_at,
+          coin_profile, coin_profile_label, bill_profile, bill_profile_label,
+          cloud_enabled, last_seen, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(serial) DO UPDATE SET
           name = excluded.name,
           model = excluded.model,
@@ -594,6 +674,14 @@ def register_machine(conn: DatabaseConnection, payload: MachineCreate) -> Dict[s
           location = excluded.location,
           status = excluded.status,
           version = excluded.version,
+          admin_machine_id = excluded.admin_machine_id,
+          security_install_fingerprint = excluded.security_install_fingerprint,
+          security_install_fingerprint_status = excluded.security_install_fingerprint_status,
+          security_install_fingerprint_created_at = excluded.security_install_fingerprint_created_at,
+          coin_profile = excluded.coin_profile,
+          coin_profile_label = excluded.coin_profile_label,
+          bill_profile = excluded.bill_profile,
+          bill_profile_label = excluded.bill_profile_label,
           cloud_enabled = excluded.cloud_enabled,
           last_seen = excluded.last_seen,
           updated_at = excluded.updated_at
@@ -607,6 +695,14 @@ def register_machine(conn: DatabaseConnection, payload: MachineCreate) -> Dict[s
             next_location,
             next_status,
             next_version,
+            next_admin_machine_id,
+            next_security_install_fingerprint,
+            next_security_install_fingerprint_status,
+            next_security_install_fingerprint_created_at,
+            next_coin_profile,
+            next_coin_profile_label,
+            next_bill_profile,
+            next_bill_profile_label,
             next_cloud_enabled,
             timestamp,
             created_at,
@@ -621,16 +717,74 @@ def register_machine(conn: DatabaseConnection, payload: MachineCreate) -> Dict[s
     return serialize_machine(machine)
 
 
-def touch_machine(conn: DatabaseConnection, serial: str, *, status: Optional[str] = None) -> Dict[str, Any]:
+def touch_machine(
+    conn: DatabaseConnection,
+    serial: str,
+    *,
+    status: Optional[str] = None,
+    version: Optional[str] = None,
+    admin_machine_id: Optional[str] = None,
+    security_install_fingerprint: Optional[str] = None,
+    security_install_fingerprint_status: Optional[str] = None,
+    security_install_fingerprint_created_at: Optional[str] = None,
+    coin_profile: Optional[str] = None,
+    coin_profile_label: Optional[str] = None,
+    bill_profile: Optional[str] = None,
+    bill_profile_label: Optional[str] = None,
+) -> Dict[str, Any]:
     if not is_16_digit_code(serial):
         raise HTTPException(status_code=400, detail="La serie debe tener 16 digitos")
 
     machine = get_machine_or_404(conn, serial)
     timestamp = now_iso()
     next_status = safe_text(status, machine["status"])
+    next_version = safe_text(version, machine["version"])
+    next_admin_machine_id = safe_text(admin_machine_id, machine["admin_machine_id"])
+    next_security_install_fingerprint = safe_text(security_install_fingerprint, machine["security_install_fingerprint"])
+    next_security_install_fingerprint_status = safe_text(
+        security_install_fingerprint_status,
+        machine["security_install_fingerprint_status"],
+    )
+    next_security_install_fingerprint_created_at = safe_text(
+        security_install_fingerprint_created_at,
+        machine["security_install_fingerprint_created_at"],
+    )
+    next_coin_profile = safe_text(coin_profile, machine["coin_profile"])
+    next_coin_profile_label = safe_text(coin_profile_label, machine["coin_profile_label"])
+    next_bill_profile = safe_text(bill_profile, machine["bill_profile"])
+    next_bill_profile_label = safe_text(bill_profile_label, machine["bill_profile_label"])
     conn.execute(
-        "UPDATE machines SET status = ?, last_seen = ?, updated_at = ? WHERE serial = ?",
-        (next_status, timestamp, timestamp, serial),
+        """
+        UPDATE machines SET
+          status = ?,
+          version = ?,
+          admin_machine_id = ?,
+          security_install_fingerprint = ?,
+          security_install_fingerprint_status = ?,
+          security_install_fingerprint_created_at = ?,
+          coin_profile = ?,
+          coin_profile_label = ?,
+          bill_profile = ?,
+          bill_profile_label = ?,
+          last_seen = ?,
+          updated_at = ?
+        WHERE serial = ?
+        """,
+        (
+            next_status,
+            next_version,
+            next_admin_machine_id,
+            next_security_install_fingerprint,
+            next_security_install_fingerprint_status,
+            next_security_install_fingerprint_created_at,
+            next_coin_profile,
+            next_coin_profile_label,
+            next_bill_profile,
+            next_bill_profile_label,
+            timestamp,
+            timestamp,
+            serial,
+        ),
     )
     updated = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
     return serialize_machine(updated)
@@ -716,25 +870,44 @@ def create_machine(payload: MachineCreate) -> Dict[str, Any]:
 
 
 @app.post("/machines/{serial}/heartbeat")
-def heartbeat(serial: str) -> Dict[str, Any]:
+def heartbeat(serial: str, payload: Optional[MachineStatusPatch] = None) -> Dict[str, Any]:
+    payload = payload or MachineStatusPatch()
     with get_db() as conn:
-        machine = touch_machine(conn, serial, status="En linea")
+        machine = touch_machine(
+            conn,
+            serial,
+            status=payload.status or "En linea",
+            version=payload.version,
+            admin_machine_id=payload.admin_machine_id,
+            security_install_fingerprint=payload.security_install_fingerprint,
+            security_install_fingerprint_status=payload.security_install_fingerprint_status,
+            security_install_fingerprint_created_at=payload.security_install_fingerprint_created_at,
+            coin_profile=first_text(payload.coin_profile, payload.meiCoinProfile),
+            coin_profile_label=first_text(payload.coin_profile_label, payload.meiCoinProfileLabel),
+            bill_profile=first_text(payload.bill_profile, payload.meiBillProfile),
+            bill_profile_label=first_text(payload.bill_profile_label, payload.meiBillProfileLabel),
+        )
     return {"machine": machine, "online": True}
 
 
 @app.patch("/machines/{serial}/status")
 def update_machine_status(serial: str, payload: MachineStatusPatch) -> Dict[str, Any]:
     with get_db() as conn:
-        machine = get_machine_or_404(conn, serial)
-        timestamp = now_iso()
-        next_status = safe_text(payload.status, machine["status"])
-        next_version = safe_text(payload.version, machine["version"])
-        conn.execute(
-            "UPDATE machines SET status = ?, version = ?, last_seen = ?, updated_at = ? WHERE serial = ?",
-            (next_status, next_version, timestamp, timestamp, serial),
+        machine = touch_machine(
+            conn,
+            serial,
+            status=payload.status,
+            version=payload.version,
+            admin_machine_id=payload.admin_machine_id,
+            security_install_fingerprint=payload.security_install_fingerprint,
+            security_install_fingerprint_status=payload.security_install_fingerprint_status,
+            security_install_fingerprint_created_at=payload.security_install_fingerprint_created_at,
+            coin_profile=first_text(payload.coin_profile, payload.meiCoinProfile),
+            coin_profile_label=first_text(payload.coin_profile_label, payload.meiCoinProfileLabel),
+            bill_profile=first_text(payload.bill_profile, payload.meiBillProfile),
+            bill_profile_label=first_text(payload.bill_profile_label, payload.meiBillProfileLabel),
         )
-        updated = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
-    return serialize_machine(updated)
+    return machine
 
 
 @app.get("/machines/{serial}/summary")
