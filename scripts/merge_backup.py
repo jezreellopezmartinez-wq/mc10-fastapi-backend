@@ -24,14 +24,16 @@ def merge(connection: psycopg.Connection, backup: dict) -> dict:
             """
             INSERT INTO machines (
               serial, name, model, profile_id, profile_title, location, status,
-              version, cloud_enabled, last_seen, created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+              version, cloud_enabled, last_seen, created_at, updated_at,
+              archived_at, archive_reason
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (serial) DO UPDATE SET
               name = EXCLUDED.name, model = EXCLUDED.model,
               profile_id = EXCLUDED.profile_id, profile_title = EXCLUDED.profile_title,
               location = EXCLUDED.location, status = EXCLUDED.status,
               version = EXCLUDED.version, cloud_enabled = EXCLUDED.cloud_enabled,
-              last_seen = EXCLUDED.last_seen, updated_at = EXCLUDED.updated_at
+              last_seen = EXCLUDED.last_seen, updated_at = EXCLUDED.updated_at,
+              archived_at = EXCLUDED.archived_at, archive_reason = EXCLUDED.archive_reason
             """,
             [
                 (
@@ -40,7 +42,8 @@ def merge(connection: psycopg.Connection, backup: dict) -> dict:
                     row.get("location") or "Sin ubicacion", row.get("status") or "En linea",
                     row.get("version") or "", 1 if row.get("cloud_enabled", True) else 0,
                     row.get("last_seen") or "", row.get("created_at") or "",
-                    row.get("updated_at") or "",
+                    row.get("updated_at") or "", row.get("archived_at") or "",
+                    row.get("archive_reason") or "",
                 )
                 for row in backup["machines"]
             ],

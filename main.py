@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional
 
 import psycopg
@@ -16,6 +17,8 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 OWNER_ACCESS_CODE = os.getenv("MC10_OWNER_CODE", "9876543210987654")
 DEMO_MACHINE_CODE = os.getenv("MC10_DEMO_MACHINE_CODE", "1234567890123456")
 ENABLE_DEMO_DATA = os.getenv("MC10_ENABLE_DEMO_DATA", "0").strip().lower() in {"1", "true", "yes", "on"}
+BUSINESS_TIMEZONE_NAME = os.getenv("MC10_BUSINESS_TIMEZONE", "America/Mexico_City").strip() or "America/Mexico_City"
+BUSINESS_TIMEZONE = ZoneInfo(BUSINESS_TIMEZONE_NAME)
 
 
 DEFAULT_PRODUCTS = [
@@ -182,6 +185,10 @@ class MachineStatusPatch(BaseModel):
     meiCoinProfileLabel: Optional[str] = None
     meiBillProfile: Optional[str] = None
     meiBillProfileLabel: Optional[str] = None
+
+
+class MachineArchiveRequest(BaseModel):
+    reason: Optional[str] = None
 
 
 app = FastAPI(title="MC10 Cloud API", version="0.2.0")
@@ -442,6 +449,8 @@ def init_db() -> None:
         ensure_column(conn, "machines", "bill_profile_label", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "machines", "cloud_enabled", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(conn, "machines", "updated_at", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "archived_at", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "archive_reason", "TEXT NOT NULL DEFAULT ''")
 
         ensure_column(conn, "products", "ms", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "products", "calibration_ms", "INTEGER NOT NULL DEFAULT 0")
@@ -792,6 +801,12 @@ def touch_machine(
 
 def machine_summary(conn: DatabaseConnection, serial: str) -> Dict[str, Any]:
     machine = get_machine_or_404(conn, serial)
+    local_now = datetime.now(BUSINESS_TIMEZONE)
+    local_start = datetime.combine(local_now.date(), time.min, tzinfo=BUSINESS_TIMEZONE)
+    utc_start = local_start.astimezone(timezone.utc)
+    utc_end = (local_start + timedelta(days=1)).astimezone(timezone.utc)
+    utc_start_iso = utc_start.isoformat(timespec="seconds").replace("+00:00", "Z")
+    utc_end_iso = utc_end.isoformat(timespec="seconds").replace("+00:00", "Z")
     totals = conn.execute(
         """
         SELECT
@@ -802,8 +817,16 @@ def machine_summary(conn: DatabaseConnection, serial: str) -> Dict[str, Any]:
           COALESCE(SUM(units), 0) AS liters
         FROM sales
         WHERE machine_serial = ?
+          AND CASE
+                WHEN COALESCE(sold_at, '') <> '' THEN sold_at
+                ELSE created_at
+              END >= ?
+          AND CASE
+                WHEN COALESCE(sold_at, '') <> '' THEN sold_at
+                ELSE created_at
+              END < ?
         """,
-        (serial,),
+        (serial, utc_start_iso, utc_end_iso),
     ).fetchone()
     active_alerts = conn.execute(
         "SELECT COUNT(*) AS total FROM alerts WHERE machine_serial = ? AND active = 1",
@@ -819,6 +842,8 @@ def machine_summary(conn: DatabaseConnection, serial: str) -> Dict[str, Any]:
             "productsSold": int(totals["products_sold"] or 0),
             "liters": float(totals["liters"] or 0),
             "alerts": int(active_alerts or 0),
+            "businessDate": local_now.date().isoformat(),
+            "businessTimezone": BUSINESS_TIMEZONE_NAME,
         },
     }
 
@@ -852,13 +877,20 @@ def login(payload: LoginRequest) -> Dict[str, Any]:
 def list_machines(_: None = Depends(verify_owner_access)) -> List[Dict[str, Any]]:
     with get_db() as conn:
         if ENABLE_DEMO_DATA:
-            rows = conn.execute("SELECT * FROM machines ORDER BY created_at DESC").fetchall()
+            rows = conn.execute("SELECT * FROM machines WHERE archived_at = '' ORDER BY created_at DESC").fetchall()
         else:
             placeholders = ",".join("?" for _ in DEMO_MACHINE_CODES)
             rows = conn.execute(
-                f"SELECT * FROM machines WHERE serial NOT IN ({placeholders}) ORDER BY created_at DESC",
+                f"SELECT * FROM machines WHERE archived_at = '' AND serial NOT IN ({placeholders}) ORDER BY created_at DESC",
                 tuple(DEMO_MACHINE_CODES),
-            ).fetchall() if DEMO_MACHINE_CODES else conn.execute("SELECT * FROM machines ORDER BY created_at DESC").fetchall()
+            ).fetchall() if DEMO_MACHINE_CODES else conn.execute("SELECT * FROM machines WHERE archived_at = '' ORDER BY created_at DESC").fetchall()
+    return [serialize_machine(row) for row in rows]
+
+
+@app.get("/machines/archived")
+def list_archived_machines(_: None = Depends(verify_owner_access)) -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM machines WHERE archived_at <> '' ORDER BY archived_at DESC").fetchall()
     return [serialize_machine(row) for row in rows]
 
 
@@ -908,6 +940,37 @@ def update_machine_status(serial: str, payload: MachineStatusPatch) -> Dict[str,
             bill_profile_label=first_text(payload.bill_profile_label, payload.meiBillProfileLabel),
         )
     return machine
+
+
+@app.post("/machines/{serial}/archive")
+def archive_machine(
+    serial: str,
+    payload: Optional[MachineArchiveRequest] = None,
+    _: None = Depends(verify_owner_access),
+) -> Dict[str, Any]:
+    with get_db() as conn:
+        get_machine_or_404(conn, serial)
+        timestamp = now_iso()
+        reason = safe_text(payload.reason if payload else None, "Archivada desde panel administrativo")
+        conn.execute(
+            "UPDATE machines SET archived_at = ?, archive_reason = ?, updated_at = ? WHERE serial = ?",
+            (timestamp, reason, timestamp, serial),
+        )
+        machine = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
+    return {"archived": True, "machine": serialize_machine(machine)}
+
+
+@app.post("/machines/{serial}/restore")
+def restore_machine(serial: str, _: None = Depends(verify_owner_access)) -> Dict[str, Any]:
+    with get_db() as conn:
+        get_machine_or_404(conn, serial)
+        timestamp = now_iso()
+        conn.execute(
+            "UPDATE machines SET archived_at = '', archive_reason = '', updated_at = ? WHERE serial = ?",
+            (timestamp, serial),
+        )
+        machine = conn.execute("SELECT * FROM machines WHERE serial = ?", (serial,)).fetchone()
+    return {"restored": True, "machine": serialize_machine(machine)}
 
 
 @app.get("/machines/{serial}/summary")

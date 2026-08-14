@@ -148,8 +148,9 @@ def insert_backup(connection: psycopg.Connection, backup: dict[str, Any]) -> str
             """
             INSERT INTO machines (
               serial, name, model, profile_id, profile_title, location, status,
-              version, cloud_enabled, last_seen, created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+              version, cloud_enabled, last_seen, created_at, updated_at,
+              archived_at, archive_reason
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             [
                 (
@@ -158,7 +159,8 @@ def insert_backup(connection: psycopg.Connection, backup: dict[str, Any]) -> str
                     row.get("location") or "Sin ubicacion", row.get("status") or "En linea",
                     row.get("version") or "", 1 if row.get("cloud_enabled", True) else 0,
                     row.get("last_seen") or "", row.get("created_at") or "",
-                    row.get("updated_at") or "",
+                    row.get("updated_at") or "", row.get("archived_at") or "",
+                    row.get("archive_reason") or "",
                 )
                 for row in backup["machines"]
             ],
