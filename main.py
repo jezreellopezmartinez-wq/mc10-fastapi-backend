@@ -185,6 +185,17 @@ class MachineStatusPatch(BaseModel):
     meiCoinProfileLabel: Optional[str] = None
     meiBillProfile: Optional[str] = None
     meiBillProfileLabel: Optional[str] = None
+    panel_status: Optional[str] = None
+    internet_status: Optional[str] = None
+    relay_status: Optional[str] = None
+    mdb_status: Optional[str] = None
+    terpa_status: Optional[str] = None
+    kiosk_status: Optional[str] = None
+    boot_id: Optional[str] = None
+    started_at: Optional[str] = None
+    uptime_seconds: Optional[int] = None
+    last_dispatch_status: Optional[str] = None
+    last_dispatch_at: Optional[str] = None
 
 
 class MachineArchiveRequest(BaseModel):
@@ -451,6 +462,18 @@ def init_db() -> None:
         ensure_column(conn, "machines", "updated_at", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "machines", "archived_at", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "machines", "archive_reason", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "panel_status", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(conn, "machines", "internet_status", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(conn, "machines", "relay_status", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(conn, "machines", "mdb_status", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(conn, "machines", "terpa_status", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(conn, "machines", "kiosk_status", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(conn, "machines", "boot_id", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "started_at", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "uptime_seconds", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "machines", "telemetry_updated_at", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "machines", "last_dispatch_status", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(conn, "machines", "last_dispatch_at", "TEXT NOT NULL DEFAULT ''")
 
         ensure_column(conn, "products", "ms", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "products", "calibration_ms", "INTEGER NOT NULL DEFAULT 0")
@@ -740,6 +763,17 @@ def touch_machine(
     coin_profile_label: Optional[str] = None,
     bill_profile: Optional[str] = None,
     bill_profile_label: Optional[str] = None,
+    panel_status: Optional[str] = None,
+    internet_status: Optional[str] = None,
+    relay_status: Optional[str] = None,
+    mdb_status: Optional[str] = None,
+    terpa_status: Optional[str] = None,
+    kiosk_status: Optional[str] = None,
+    boot_id: Optional[str] = None,
+    started_at: Optional[str] = None,
+    uptime_seconds: Optional[int] = None,
+    last_dispatch_status: Optional[str] = None,
+    last_dispatch_at: Optional[str] = None,
 ) -> Dict[str, Any]:
     if not is_16_digit_code(serial):
         raise HTTPException(status_code=400, detail="La serie debe tener 16 digitos")
@@ -762,6 +796,15 @@ def touch_machine(
     next_coin_profile_label = safe_text(coin_profile_label, machine["coin_profile_label"])
     next_bill_profile = safe_text(bill_profile, machine["bill_profile"])
     next_bill_profile_label = safe_text(bill_profile_label, machine["bill_profile_label"])
+    valid_component_states = {"ok", "error", "unknown"}
+    def component_state(value: Optional[str], current: str) -> str:
+        normalized = safe_text(value, current).lower()
+        return normalized if normalized in valid_component_states else current
+    next_uptime_seconds = machine["uptime_seconds"] if uptime_seconds is None else max(0, int(uptime_seconds))
+    telemetry_received = any(value is not None for value in (
+        panel_status, internet_status, relay_status, mdb_status, terpa_status,
+        kiosk_status, boot_id, started_at, uptime_seconds, last_dispatch_status, last_dispatch_at,
+    ))
     conn.execute(
         """
         UPDATE machines SET
@@ -775,6 +818,10 @@ def touch_machine(
           coin_profile_label = ?,
           bill_profile = ?,
           bill_profile_label = ?,
+          panel_status = ?, internet_status = ?, relay_status = ?, mdb_status = ?,
+          terpa_status = ?, kiosk_status = ?, boot_id = ?, started_at = ?,
+          uptime_seconds = ?, telemetry_updated_at = ?,
+          last_dispatch_status = ?, last_dispatch_at = ?,
           last_seen = ?,
           updated_at = ?
         WHERE serial = ?
@@ -790,6 +837,18 @@ def touch_machine(
             next_coin_profile_label,
             next_bill_profile,
             next_bill_profile_label,
+            component_state(panel_status, machine["panel_status"]),
+            component_state(internet_status, machine["internet_status"]),
+            component_state(relay_status, machine["relay_status"]),
+            component_state(mdb_status, machine["mdb_status"]),
+            component_state(terpa_status, machine["terpa_status"]),
+            component_state(kiosk_status, machine["kiosk_status"]),
+            safe_text(boot_id, machine["boot_id"]),
+            safe_text(started_at, machine["started_at"]),
+            next_uptime_seconds,
+            timestamp if telemetry_received else machine["telemetry_updated_at"],
+            safe_text(last_dispatch_status, machine["last_dispatch_status"]),
+            safe_text(last_dispatch_at, machine["last_dispatch_at"]),
             timestamp,
             timestamp,
             serial,
@@ -918,6 +977,17 @@ def heartbeat(serial: str, payload: Optional[MachineStatusPatch] = None) -> Dict
             coin_profile_label=first_text(payload.coin_profile_label, payload.meiCoinProfileLabel),
             bill_profile=first_text(payload.bill_profile, payload.meiBillProfile),
             bill_profile_label=first_text(payload.bill_profile_label, payload.meiBillProfileLabel),
+            panel_status=payload.panel_status,
+            internet_status=payload.internet_status,
+            relay_status=payload.relay_status,
+            mdb_status=payload.mdb_status,
+            terpa_status=payload.terpa_status,
+            kiosk_status=payload.kiosk_status,
+            boot_id=payload.boot_id,
+            started_at=payload.started_at,
+            uptime_seconds=payload.uptime_seconds,
+            last_dispatch_status=payload.last_dispatch_status,
+            last_dispatch_at=payload.last_dispatch_at,
         )
     return {"machine": machine, "online": True}
 
@@ -938,6 +1008,17 @@ def update_machine_status(serial: str, payload: MachineStatusPatch) -> Dict[str,
             coin_profile_label=first_text(payload.coin_profile_label, payload.meiCoinProfileLabel),
             bill_profile=first_text(payload.bill_profile, payload.meiBillProfile),
             bill_profile_label=first_text(payload.bill_profile_label, payload.meiBillProfileLabel),
+            panel_status=payload.panel_status,
+            internet_status=payload.internet_status,
+            relay_status=payload.relay_status,
+            mdb_status=payload.mdb_status,
+            terpa_status=payload.terpa_status,
+            kiosk_status=payload.kiosk_status,
+            boot_id=payload.boot_id,
+            started_at=payload.started_at,
+            uptime_seconds=payload.uptime_seconds,
+            last_dispatch_status=payload.last_dispatch_status,
+            last_dispatch_at=payload.last_dispatch_at,
         )
     return machine
 
