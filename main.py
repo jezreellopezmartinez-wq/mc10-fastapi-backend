@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import base64
+import json
 import os
+import re
 from uuid import uuid4
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional
 
 import psycopg
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -19,6 +23,9 @@ DEMO_MACHINE_CODE = os.getenv("MC10_DEMO_MACHINE_CODE", "1234567890123456")
 ENABLE_DEMO_DATA = os.getenv("MC10_ENABLE_DEMO_DATA", "0").strip().lower() in {"1", "true", "yes", "on"}
 BUSINESS_TIMEZONE_NAME = os.getenv("MC10_BUSINESS_TIMEZONE", "America/Mexico_City").strip() or "America/Mexico_City"
 BUSINESS_TIMEZONE = ZoneInfo(BUSINESS_TIMEZONE_NAME)
+LICENSE_PRIVATE_KEY_DER_B64 = os.getenv("MC10_LICENSE_PRIVATE_KEY_DER_B64", "").strip()
+LICENSE_FINGERPRINT_RE = re.compile(r"^[a-f0-9]{64}$")
+LICENSE_INSTALLATION_ID_RE = re.compile(r"^[a-f0-9-]{36}$")
 
 
 DEFAULT_PRODUCTS = [
@@ -79,6 +86,14 @@ DEMO_MACHINE_CODES = {machine["serial"] for machine in DEMO_MACHINES}
 
 class LoginRequest(BaseModel):
     code: str = Field(..., min_length=1)
+
+
+class LicenseRequestCreate(BaseModel):
+    installation_id: str = Field(..., min_length=36, max_length=36)
+    fingerprint: str = Field(..., min_length=64, max_length=64)
+    fingerprint_schema: str = Field(default="mc10-hardware-v2", max_length=40)
+    machine_name: str = Field(default="", max_length=120)
+    app_version: str = Field(default="", max_length=60)
 
 
 class ProductUpsert(BaseModel):
@@ -289,6 +304,31 @@ def bool_to_int(value: Optional[bool], fallback: bool = True) -> int:
     return 1 if bool(value) else 0
 
 
+def base64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def sign_permanent_license(installation_id: str, fingerprint: str, fingerprint_schema: str) -> tuple[str, str]:
+    if not LICENSE_PRIVATE_KEY_DER_B64:
+        raise HTTPException(status_code=503, detail="Firma de licencias no configurada")
+    try:
+        private_key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(LICENSE_PRIVATE_KEY_DER_B64)[-32:])
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Clave de licencias invalida") from exc
+    license_id = str(uuid4())
+    document = {
+        "fingerprint": fingerprint,
+        "fingerprintSchema": fingerprint_schema,
+        "installationId": installation_id,
+        "issuedAt": now_iso(),
+        "licenseId": license_id,
+        "permanent": True,
+        "schema": "mc10-license-v1",
+    }
+    payload = json.dumps(document, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return license_id, f"{base64url(payload)}.{base64url(private_key.sign(payload))}"
+
+
 def is_demo_serial(serial: str) -> bool:
     return serial in DEMO_MACHINE_CODES
 
@@ -442,6 +482,20 @@ def init_db() -> None:
               result_message TEXT NOT NULL DEFAULT '',
               software_version TEXT NOT NULL DEFAULT '',
               FOREIGN KEY (machine_serial) REFERENCES machines(serial)
+            );
+
+            CREATE TABLE IF NOT EXISTS license_requests (
+              installation_id TEXT PRIMARY KEY,
+              fingerprint TEXT NOT NULL,
+              fingerprint_schema TEXT NOT NULL,
+              machine_name TEXT NOT NULL DEFAULT '',
+              app_version TEXT NOT NULL DEFAULT '',
+              status TEXT NOT NULL DEFAULT 'pending',
+              license_id TEXT NOT NULL DEFAULT '',
+              license_token TEXT NOT NULL DEFAULT '',
+              requested_at TEXT NOT NULL,
+              authorized_at TEXT NOT NULL DEFAULT '',
+              last_seen TEXT NOT NULL
             );
             """
         )
@@ -930,6 +984,86 @@ def login(payload: LoginRequest) -> Dict[str, Any]:
     with get_db() as conn:
         machine = touch_machine(conn, code)
     return {"role": "client", "code": code, "machine": machine}
+
+
+@app.post("/licenses/request")
+def request_license(payload: LicenseRequestCreate) -> Dict[str, Any]:
+    installation_id = payload.installation_id.strip().lower()
+    fingerprint = payload.fingerprint.strip().lower()
+    if not LICENSE_INSTALLATION_ID_RE.fullmatch(installation_id):
+        raise HTTPException(status_code=422, detail="Identificador de instalacion invalido")
+    if not LICENSE_FINGERPRINT_RE.fullmatch(fingerprint):
+        raise HTTPException(status_code=422, detail="Huella de hardware invalida")
+    timestamp = now_iso()
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT * FROM license_requests WHERE installation_id = ?", (installation_id,)
+        ).fetchone()
+        if existing and existing["fingerprint"] != fingerprint:
+            raise HTTPException(status_code=409, detail="La instalacion fue copiada a otro equipo")
+        if not existing:
+            existing = conn.execute(
+                """
+                INSERT INTO license_requests (
+                  installation_id, fingerprint, fingerprint_schema, machine_name,
+                  app_version, status, requested_at, last_seen
+                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?) RETURNING *
+                """,
+                (
+                    installation_id, fingerprint, safe_text(payload.fingerprint_schema, "mc10-hardware-v2"),
+                    safe_text(payload.machine_name), safe_text(payload.app_version), timestamp, timestamp,
+                ),
+            ).fetchone()
+        else:
+            existing = conn.execute(
+                """
+                UPDATE license_requests SET machine_name = ?, app_version = ?, last_seen = ?
+                WHERE installation_id = ? RETURNING *
+                """,
+                (safe_text(payload.machine_name), safe_text(payload.app_version), timestamp, installation_id),
+            ).fetchone()
+    response: Dict[str, Any] = {"installationId": installation_id, "status": existing["status"]}
+    if existing["status"] == "authorized":
+        response["licenseToken"] = existing["license_token"]
+    return response
+
+
+@app.get("/licenses/requests")
+def list_license_requests(status: str = "pending", _: None = Depends(verify_owner_access)) -> List[Dict[str, Any]]:
+    normalized = status.strip().lower()
+    with get_db() as conn:
+        if normalized in {"pending", "authorized", "revoked"}:
+            rows = conn.execute(
+                "SELECT * FROM license_requests WHERE status = ? ORDER BY requested_at DESC", (normalized,)
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM license_requests ORDER BY requested_at DESC").fetchall()
+    return [{key: value for key, value in row_to_dict(row).items() if key != "license_token"} for row in rows]
+
+
+@app.post("/licenses/requests/{installation_id}/authorize")
+def authorize_license(installation_id: str, _: None = Depends(verify_owner_access)) -> Dict[str, Any]:
+    installation_id = installation_id.strip().lower()
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM license_requests WHERE installation_id = ?", (installation_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Solicitud de licencia no encontrada")
+        if row["status"] == "authorized" and row["license_token"]:
+            return {"installationId": installation_id, "status": "authorized", "licenseId": row["license_id"]}
+        license_id, token = sign_permanent_license(
+            installation_id, row["fingerprint"], row["fingerprint_schema"]
+        )
+        timestamp = now_iso()
+        conn.execute(
+            """
+            UPDATE license_requests SET status = 'authorized', license_id = ?, license_token = ?, authorized_at = ?
+            WHERE installation_id = ?
+            """,
+            (license_id, token, timestamp, installation_id),
+        )
+    return {"installationId": installation_id, "status": "authorized", "licenseId": license_id}
 
 
 @app.get("/machines")
