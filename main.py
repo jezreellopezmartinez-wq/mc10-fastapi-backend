@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional
 
 import psycopg
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from sales_report import sales_report
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from psycopg.rows import dict_row
@@ -1400,6 +1401,36 @@ def confirm_price_update(
             ),
         ).fetchone()
     return serialize_price_update(row)
+
+
+@app.get("/machines/{serial}/sales-report")
+def get_sales_report(
+    serial: str,
+    period: str = Query("all", pattern="^(all|today|7d|30d)$"),
+    payment: str = Query("all", pattern="^(all|cash|card)$"),
+    query: str = Query("", max_length=150),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    snapshot: Optional[int] = Query(None, ge=0),
+    _: None = Depends(verify_owner_access),
+) -> Dict[str, Any]:
+    with get_db() as conn:
+        get_machine_or_404(conn, serial)
+        result = sales_report(conn, serial, BUSINESS_TIMEZONE, period=period,
+                              payment=payment, query=query.strip(), limit=limit,
+                              offset=offset, snapshot=snapshot)
+    result["items"] = [serialize_sale(row) for row in result["items"]]
+    return result
+
+
+@app.get("/machines/{serial}/sales-record/{sale_id}")
+def get_sales_record(serial: str, sale_id: str, _: None = Depends(verify_owner_access)):
+    with get_db() as conn:
+        get_machine_or_404(conn, serial)
+        row = conn.execute("SELECT * FROM sales WHERE machine_serial = ? AND (sale_id = ? OR request_id = ? OR CAST(id AS TEXT) = ?) LIMIT 1", (serial, sale_id, sale_id, sale_id)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return serialize_sale(row)
 
 
 @app.get("/machines/{serial}/sales")
