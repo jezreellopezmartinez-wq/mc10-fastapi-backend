@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional
 
 import psycopg
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from sale_time import choose_sale_time
 from sales_report import sales_report
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -145,6 +146,8 @@ class SaleCreate(BaseModel):
     units: Optional[float] = None
     currency: Optional[str] = None
     sold_at: Optional[str] = None
+    clock_source: Optional[str] = Field(default=None, max_length=40)
+    device_sold_at: Optional[str] = Field(default=None, max_length=100)
     source: Optional[str] = None
     app_version: Optional[str] = None
     channel: Optional[int] = None
@@ -231,6 +234,13 @@ app.add_middleware(
 
 def now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+
+@app.get("/time")
+def server_time(response: Response) -> Dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return {"version": 1, "epoch_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
+            "business_timezone": BUSINESS_TIMEZONE_NAME}
 
 
 class DatabaseConnection:
@@ -547,6 +557,9 @@ def init_db() -> None:
         ensure_column(conn, "sales", "local_sale_counter", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "sales", "dispatch_status", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "sales", "sold_at", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "sales", "original_sold_at", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "sales", "device_sold_at", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "sales", "time_status", "TEXT NOT NULL DEFAULT 'legacy_device'")
 
         conn.execute(
             """
@@ -1494,7 +1507,7 @@ def create_sale(serial: str, payload: SaleCreate) -> Dict[str, Any]:
         amount = payload.amount if payload.amount is not None else (product["price"] if product else 0)
         units = payload.units if payload.units is not None else (product["dispense_size"] if product else 1)
         timestamp = now_iso()
-        sold_at = safe_text(payload.sold_at, timestamp)
+        sold_at, time_status = choose_sale_time(payload.sold_at, timestamp, payload.clock_source)
         payment_method = safe_text(payload.payment_method, payload.method.lower())
         relay = int(payload.relay if payload.relay is not None else (product["relay"] if product else payload.channel or 0) or 0)
         channel = int(payload.channel if payload.channel is not None else relay)
@@ -1506,9 +1519,10 @@ def create_sale(serial: str, payload: SaleCreate) -> Dict[str, Any]:
             INSERT INTO sales (
               machine_serial, sale_id, request_id, product_id, product_name, method,
               payment_method, amount, units, currency, source, app_version,
-              channel, relay, local_sale_counter, dispatch_status, sold_at, created_at
+              channel, relay, local_sale_counter, dispatch_status, sold_at, created_at,
+              original_sold_at, device_sold_at, time_status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING *
             """,
             (
@@ -1530,6 +1544,9 @@ def create_sale(serial: str, payload: SaleCreate) -> Dict[str, Any]:
                 dispatch_status,
                 sold_at,
                 timestamp,
+                payload.sold_at or "",
+                payload.device_sold_at or payload.sold_at or "",
+                time_status,
             ),
         ).fetchone()
         conn.execute(
